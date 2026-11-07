@@ -193,6 +193,7 @@ def api_meta():
 def api_debug():
     names = [t.name for t in threading.enumerate()]
     return jsonify({
+        "pid": os.getpid(),
         "poller_thread_alive": _poller_alive(),
         "threads": names,
         "key_present": bool(KEY),

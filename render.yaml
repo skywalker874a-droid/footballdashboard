@@ -5,9 +5,10 @@ services:
     runtime: python
     plan: starter            # always-on; do NOT use "free" (it sleeps and pauses the poller)
     buildCommand: pip install -r requirements.txt
-    # ONE worker only: the 5-min poller is a single background thread holding
-    # in-memory state. More workers = duplicate API calls + split data.
-    startCommand: gunicorn app:app --workers 1 --threads 8 --bind 0.0.0.0:$PORT --timeout 120
+    # ONE worker only (enforced in gunicorn.conf.py): the 5-min poller is a single
+    # background thread holding in-memory state. More workers = duplicate API calls
+    # + split data (requests bounce between workers showing inconsistent results).
+    startCommand: gunicorn app:app -c gunicorn.conf.py --bind 0.0.0.0:$PORT
     healthCheckPath: /api/meta
     envVars:
       - key: APISPORTS_KEY
