@@ -1,0 +1,13 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# local data / scratch from earlier testing (not needed in the deployed app)
+stats.db
+stats.csv
+momentum_log.txt
+
+# never commit secrets
+.env

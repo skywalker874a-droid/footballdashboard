@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Momentum</title>
+<style>
+  :root{
+    --bg:#0e1116; --card:#171c24; --card2:#1e252f; --line:#2a323d;
+    --txt:#e6eaf0; --dim:#8b96a5; --home:#22c55e; --away:#6366f1;
+    --accent:#38bdf8; --warn:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:720px;margin:0 auto;padding:16px 16px calc(32px + env(safe-area-inset-bottom))}
+  header{position:sticky;top:0;z-index:10;background:linear-gradient(var(--bg) 70%,transparent);
+    padding:14px 16px 10px;display:flex;align-items:center;gap:10px;max-width:720px;margin:0 auto}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px}
+  .meta{font-size:12px;color:var(--dim);margin-left:auto;text-align:right;line-height:1.35}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--home);
+    margin-right:5px;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* list */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;
+    margin-bottom:10px;cursor:pointer;transition:transform .08s ease,border-color .12s}
+  .card:active{transform:scale(.995)}
+  .card:hover{border-color:#3a4654}
+  .league{font-size:11px;color:var(--dim);display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .league .lg{display:flex;align-items:center;gap:6px;min-width:0}
+  .league .lg span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .league img{width:14px;height:14px;border-radius:3px;object-fit:contain;background:#fff1;flex:none}
+  .row{display:flex;align-items:center;gap:10px}
+  .team{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+  .team.away{justify-content:flex-end}
+  .team img{width:22px;height:22px;object-fit:contain;flex:none}
+  .team .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .score{font-size:16px;font-weight:800;background:var(--card2);border-radius:8px;
+    padding:3px 10px;white-space:nowrap}
+  .min{font-size:11px;color:var(--home);font-weight:700;text-align:center;margin-top:2px}
+
+  /* bar */
+  .bar{display:flex;height:9px;border-radius:6px;overflow:hidden;margin-top:11px;background:var(--card2)}
+  .bar .h{background:var(--home)} .bar .a{background:var(--away)}
+  .barlbl{display:flex;justify-content:space-between;font-size:11px;margin-top:5px;color:var(--dim)}
+  .barlbl b{color:var(--txt)}
+  .barlbl .lh{color:var(--home)} .barlbl .la{color:var(--away)}
+
+  /* detail */
+  .back{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--accent);
+    padding:6px 2px;margin-bottom:6px;cursor:pointer}
+  .dhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:6px 0 4px}
+  .dhead .t{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0}
+  .dhead .t img{width:40px;height:40px;object-fit:contain}
+  .dhead .t .nm{font-size:13px;font-weight:700;text-align:center}
+  .dhead .sc{font-size:26px;font-weight:900}
+  .section{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:14px;margin-top:12px}
+  .section h3{margin:0 0 4px;font-size:13px;letter-spacing:.3px;text-transform:uppercase;color:var(--dim)}
+  .bigbar{display:flex;height:16px;border-radius:9px;overflow:hidden;background:var(--card2);margin:10px 0 6px}
+  .bigbar .h{background:var(--home)} .bigbar .a{background:var(--away)}
+  .pct{display:flex;justify-content:space-between;font-size:15px;font-weight:800}
+  .pct .lh{color:var(--home)} .pct .la{color:var(--away)}
+  .muted{color:var(--dim);font-size:13px}
+
+  /* stats table */
+  table{width:100%;border-collapse:collapse;margin-top:4px}
+  td{padding:7px 2px;font-size:13px;border-bottom:1px solid var(--line)}
+  td.sh{width:22%;text-align:left;font-weight:700}
+  td.sa{width:22%;text-align:right;font-weight:700}
+  td.sk{text-align:center;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.3px}
+  tr:last-child td{border-bottom:none}
+
+  /* stat rows with split bars */
+  .stats{margin-top:4px}
+  .statrow{padding:9px 0;border-bottom:1px solid var(--line)}
+  .statrow:last-child{border-bottom:none}
+  .statvals{display:flex;justify-content:space-between;align-items:center;font-size:13px;gap:10px}
+  .statvals b{font-weight:800;min-width:46px}
+  .statvals b.r{text-align:right}
+  .statvals .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.3px;text-align:center;flex:1}
+  .statbar{display:flex;height:6px;border-radius:4px;overflow:hidden;background:var(--card2);margin-top:7px}
+  .statbar .h{background:var(--home)} .statbar .a{background:var(--away)}
+  .statbar .h,.statbar .a{transition:width .3s ease}
+
+  .empty{text-align:center;color:var(--dim);padding:48px 0;font-size:14px}
+  .spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:rot 1s linear infinite;margin:40px auto}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .legend{font-size:11px;color:var(--dim);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap}
+  .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .legend .mh::before{background:var(--home)} .legend .ma::before{background:var(--away)}
+
+  /* coverage badges */
+  .badge{font-size:9px;font-weight:800;letter-spacing:.5px;padding:2px 7px;border-radius:5px;
+    text-transform:uppercase;white-space:nowrap;flex:none}
+  .b-full{background:rgba(34,197,94,.16);color:#4ade80}
+  .b-partial{background:rgba(245,158,11,.16);color:#fbbf24}
+  .b-none{background:rgba(139,150,165,.14);color:#9aa6b4}
+  .card.none{opacity:.72}
+  .nostat{font-size:12px;color:var(--dim);margin-top:10px;font-style:italic}
+  .meta .cf{color:#4ade80} .meta .cp{color:#fbbf24} .meta .cn{color:#9aa6b4}
+</style>
+</head>
+<body>
+<header>
+  <h1>Live Momentum</h1>
+  <div class="meta" id="meta"><span class="dot"></span>connecting…</div>
+</header>
+<div class="wrap" id="app"><div class="spin"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let VIEW = {page:"list", fid:null};
+let TIMER = null;
+
+function fmtTime(iso){ if(!iso) return "—"; const d=new Date(iso);
+  return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}); }
+
+function barList(dom){
+  const h = dom==null?50:dom, a=100-h;
+  return `<div class="bar"><div class="h" style="width:${h}%"></div><div class="a" style="width:${a}%"></div></div>`;
+}
+
+async function loadList(){
+  let data;
+  try{ data = await (await fetch("/api/matches")).json(); }
+  catch(e){ $("#meta").innerHTML = "offline"; return; }
+  const m = data.meta||{}; const c = m.counts||{};
+  const hidden = (c.skipped||0);
+  $("#meta").innerHTML = `<span class="dot"></span>${data.matches.length} with stats · updated ${fmtTime(m.last_poll)}`
+      + `<br><span class="cf">${c.full||0} full</span> · <span class="cp">${c.partial||0} partial</span>`
+      + (hidden? ` · <span class="cn">${hidden} no-stats hidden</span>`:"");
+  if(VIEW.page!=="list") return;
+  if(!data.matches.length){
+    $("#app").innerHTML = `<div class="empty">No live matches with stats right now.<br>The list refreshes automatically.</div>`;
+    return;
+  }
+  const BADGE = {full:["b-full","Full"], partial:["b-partial","Partial"], none:["b-none","No stats"]};
+  $("#app").innerHTML = data.matches.map(x=>{
+    const dom = x.dominance==null?50:x.dominance;
+    const cov = x.coverage||"none";
+    const [bcls, btxt] = BADGE[cov] || BADGE.none;
+    const logo = u => u?`<img src="${u}" onerror="this.style.visibility='hidden'">`:"";
+    const domBlock = cov==="none"
+      ? `<div class="nostat">No live stats for this match</div>`
+      : barList(x.dominance) + `<div class="barlbl"><span class="lh"><b>${dom}%</b> ${x.home.name}</span>`
+        + `<span class="la">${x.away.name} <b>${100-dom}%</b></span></div>`;
+    return `<div class="card ${cov}" onclick="openMatch(${x.id})">
+      <div class="league"><span class="lg">${logo(x.league_logo)}<span>${x.country? x.country+" · ":""}${x.league||""}</span></span>
+        <span class="badge ${bcls}">${btxt}</span></div>
+      <div class="row">
+        <div class="team">${logo(x.home.logo)}<span class="nm">${x.home.name}</span></div>
+        <div style="text-align:center">
+          <div class="score">${x.score.home ?? 0} - ${x.score.away ?? 0}</div>
+          <div class="min">${x.minute!=null? x.minute+"'":""} ${x.status||""}</div>
+        </div>
+        <div class="team away"><span class="nm">${x.away.name}</span>${logo(x.away.logo)}</div>
+      </div>
+      ${domBlock}
+    </div>`;
+  }).join("");
+}
+
+async function loadDetail(fid){
+  let x;
+  try{
+    const r = await fetch("/api/match/"+fid);
+    if(!r.ok){ backToList(); return; }
+    x = await r.json();
+  }catch(e){ return; }
+  if(VIEW.page!=="detail" || VIEW.fid!==fid) return;
+  const dom = x.dominance==null?50:x.dominance;
+  const mom = x.momentum;
+  const cov = x.coverage||"none";
+  const logo = (u,s=40) => u?`<img src="${u}" style="width:${s}px;height:${s}px" onerror="this.style.visibility='hidden'">`:"";
+
+  const head = `
+    <div class="back" onclick="backToList()">‹ All matches</div>
+    <div class="league" style="margin-bottom:10px"><span class="lg">${x.league_logo?`<img src="${x.league_logo}">`:""}
+      <span>${x.country? x.country+" · ":""}${x.league||""} · updated ${fmtTime(x.updated_at)}</span></span>
+      <span class="badge ${{full:"b-full",partial:"b-partial",none:"b-none"}[cov]}">${{full:"Full",partial:"Partial",none:"No stats"}[cov]}</span></div>
+    <div class="dhead">
+      <div class="t">${logo(x.home.logo)}<div class="nm">${x.home.name}</div></div>
+      <div class="sc">${x.score.home ?? 0} - ${x.score.away ?? 0}<div class="min" style="text-align:center">${x.minute!=null?x.minute+"' ":""}${x.status||""}</div></div>
+      <div class="t">${logo(x.away.logo)}<div class="nm">${x.away.name}</div></div>
+    </div>`;
+
+  if(cov==="none"){
+    $("#app").innerHTML = head +
+      `<div class="section"><p class="muted">No live statistics are available for this match. It will show dominance and momentum once the data provider starts publishing stats for it.</p></div>`;
+    return;
+  }
+  const covNote = cov==="partial"
+    ? `<div class="section" style="border-color:rgba(245,158,11,.4)">
+         <h3 style="color:#fbbf24">Limited coverage</h3>
+         <p class="muted">This match doesn't provide xG. Dominance and momentum are computed from the remaining stats, so that 20% weight sits neutral.</p></div>`
+    : "";
+
+  const momBlock = (mom==null)
+    ? `<p class="muted">Awaiting the next 5-minute update to measure the window.</p>`
+    : `<div class="bigbar"><div class="h" style="width:${mom}%"></div><div class="a" style="width:${100-mom}%"></div></div>
+       <div class="pct"><span class="lh">${mom}%</span><span class="la">${100-mom}%</span></div>`;
+
+  const order = ["Ball Possession","expected_goals","Total Shots","Shots on Goal","Shots off Goal",
+    "Blocked Shots","Shots insidebox","Shots outsidebox","Corner Kicks","Offsides","Fouls",
+    "Yellow Cards","Red Cards","Goalkeeper Saves","Total passes","Passes accurate","Passes %"];
+  const nice = {"Ball Possession":"Possession","expected_goals":"xG","Total Shots":"Total shots",
+    "Shots on Goal":"Shots on target","Shots off Goal":"Shots off target","Blocked Shots":"Blocked",
+    "Shots insidebox":"Shots in box","Shots outsidebox":"Shots out box","Corner Kicks":"Corners",
+    "Offsides":"Offsides","Fouls":"Fouls","Yellow Cards":"Yellow","Red Cards":"Red",
+    "Goalkeeper Saves":"GK saves","Total passes":"Passes","Passes accurate":"Passes acc.","Passes %":"Pass %"};
+  const sNum = v => {
+    if(v==null) return 0;
+    if(typeof v==="string"){ const t=v.trim(); if(t===""||t==="-") return 0;
+      if(t.endsWith("%")) return parseFloat(t)||0; }
+    const n=parseFloat(v); return isNaN(n)?0:n;
+  };
+  const rows = order.filter(k=>k in x.stats_home || k in x.stats_away).map(k=>{
+    const hv = x.stats_home[k] ?? "-", av = x.stats_away[k] ?? "-";
+    const hn = sNum(hv), an = sNum(av), tot = hn+an;
+    const hp = Math.round(hn/tot*100);
+    const bar = tot<=0
+      ? `<div class="statbar"></div>`   // no data for either side -> empty track
+      : `<div class="statbar"><div class="h" style="width:${hp}%"></div><div class="a" style="width:${100-hp}%"></div></div>`;
+    return `<div class="statrow">
+      <div class="statvals"><b>${hv}</b><span class="k">${nice[k]||k}</span><b class="r">${av}</b></div>
+      ${bar}
+    </div>`;
+  }).join("");
+
+  $("#app").innerHTML = head + `
+    <div class="section">
+      <h3>Dominance · whole match</h3>
+      <div class="bigbar"><div class="h" style="width:${dom}%"></div><div class="a" style="width:${100-dom}%"></div></div>
+      <div class="pct"><span class="lh">${dom}%</span><span class="la">${100-dom}%</span></div>
+    </div>
+    <div class="section">
+      <h3>Momentum · last 5 min</h3>
+      ${momBlock}
+    </div>
+    ${covNote}
+    <div class="section">
+      <h3>Live stats</h3>
+      <div class="stats">${rows}</div>
+      <div class="legend"><span class="mh">${x.home.name}</span><span class="ma">${x.away.name}</span></div>
+    </div>`;
+}
+
+function render(){
+  clearInterval(TIMER);
+  if(VIEW.page==="list"){ loadList(); TIMER=setInterval(loadList, 20000); }
+  else { loadDetail(VIEW.fid); TIMER=setInterval(()=>loadDetail(VIEW.fid), 20000); loadList(); /*keep header fresh*/ }
+}
+function openMatch(fid){ VIEW={page:"detail",fid}; window.scrollTo(0,0); render(); }
+function backToList(){ VIEW={page:"list",fid:null}; window.scrollTo(0,0); render(); }
+window.openMatch=openMatch; window.backToList=backToList;
+render();
+</script>
+</body>
+</html>

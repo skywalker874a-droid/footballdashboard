@@ -1,0 +1,20 @@
+# Render blueprint — deploy with "New > Blueprint" pointing at this repo.
+services:
+  - type: web
+    name: live-momentum
+    runtime: python
+    plan: starter            # always-on; do NOT use "free" (it sleeps and pauses the poller)
+    buildCommand: pip install -r requirements.txt
+    # ONE worker only: the 5-min poller is a single background thread holding
+    # in-memory state. More workers = duplicate API calls + split data.
+    startCommand: gunicorn app:app --workers 1 --threads 8 --bind 0.0.0.0:$PORT --timeout 120
+    healthCheckPath: /api/meta
+    envVars:
+      - key: APISPORTS_KEY
+        sync: false          # set this secret in the Render dashboard (never in the repo)
+      - key: POLL_INTERVAL
+        value: "300"
+      - key: MAX_NONE_CHECKS
+        value: "2"
+      - key: AUTOSTART_POLLER
+        value: "1"
