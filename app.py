@@ -205,35 +205,6 @@ def api_debug():
     })
 
 
-@app.route("/api/debug/poll")
-def api_debug_poll():
-    """Run one poll synchronously with timing (diagnostics)."""
-    import time as _t
-    import traceback
-    out = {}
-    try:
-        t0 = _t.time()
-        fx = sofa_api.live_fixtures(KEY)
-        out["live_fixtures_count"] = len(fx)
-        out["live_fixtures_secs"] = round(_t.time() - t0, 2)
-        if fx:
-            t1 = _t.time()
-            st = sofa_api.statistics(KEY, fx[0]["fixture"]["id"])
-            out["one_stat_secs"] = round(_t.time() - t1, 2)
-            out["one_stat_blocks"] = len(st)
-        t2 = _t.time()
-        poll_once()
-        out["poll_once_secs"] = round(_t.time() - t2, 2)
-        out["tracked"] = len(STORE)
-        out["counts"] = META.get("counts")
-        out["ok"] = True
-    except Exception as e:  # noqa: BLE001
-        out["ok"] = False
-        out["error"] = str(e)
-        out["trace"] = traceback.format_exc()[-1500:]
-    return jsonify(out)
-
-
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
