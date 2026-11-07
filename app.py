@@ -147,18 +147,34 @@ def poll_once():
                 with_stats=counts["full"] + counts["partial"], counts=counts, error=None)
 
 
+CYCLE_DEADLINE = int(os.environ.get("CYCLE_DEADLINE", "90"))  # max secs per poll cycle
+
+
+def _run_poll_cycle():
+    POLL_DBG["phase"] = "polling"
+    POLL_DBG["started_at"] = _iso()
+    try:
+        poll_once()
+        POLL_DBG["phase"] = "done"
+    except Exception as e:  # noqa: BLE001
+        META.update(error=str(e), last_poll=_iso())
+        POLL_DBG["phase"] = "error: " + str(e)[:120]
+    POLL_DBG["finished_at"] = _iso()
+
+
 def poller_loop():
+    # Run each cycle in a disposable thread with a hard deadline. A network call
+    # can hang past its socket timeout (urllib's timeout does NOT cover DNS), which
+    # would otherwise wedge the poller forever. If a cycle overruns, we abandon it
+    # (daemon thread, harmless) and try again next interval — the poller never freezes.
     while True:
         POLL_DBG["loop_iters"] += 1
-        POLL_DBG["phase"] = "polling"
-        POLL_DBG["started_at"] = _iso()
-        try:
-            poll_once()
-            POLL_DBG["phase"] = "sleeping"
-        except Exception as e:  # noqa: BLE001
-            META.update(error=str(e), last_poll=_iso())
-            POLL_DBG["phase"] = "error: " + str(e)[:120]
-        POLL_DBG["finished_at"] = _iso()
+        t = threading.Thread(target=_run_poll_cycle, name="poll-cycle", daemon=True)
+        t.start()
+        t.join(timeout=CYCLE_DEADLINE)
+        if t.is_alive():
+            POLL_DBG["phase"] = f"cycle stuck >{CYCLE_DEADLINE}s (network); retrying"
+            META["error"] = f"poll cycle exceeded {CYCLE_DEADLINE}s (likely DNS/network); retrying"
         time.sleep(POLL_INTERVAL)
 
 
