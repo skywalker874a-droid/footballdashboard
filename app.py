@@ -195,9 +195,13 @@ def start_poller():
     `main()` (local run) and module import (gunicorn/WSGI)."""
     global _poller_started
     with _poller_lock:
-        if _poller_started or not KEY:
+        if _poller_started:
+            return
+        if not KEY:
+            print("[poller] NOT started: APISPORTS_KEY is not set", flush=True)
             return
         _poller_started = True
+    print(f"[poller] started (interval {POLL_INTERVAL}s)", flush=True)
     threading.Thread(target=poller_loop, daemon=True).start()
 
 
@@ -210,8 +214,9 @@ def main():
 
 
 # When served by a WSGI server (gunicorn) the module is imported rather than run,
-# so start the poller here too. Set AUTOSTART_POLLER=0 to disable (e.g. in tests).
-if os.environ.get("AUTOSTART_POLLER", "1") == "1":
+# so start the poller here too. It starts by default; set AUTOSTART_POLLER=0 to
+# disable (e.g. in tests). Any value other than "0" (or unset) starts it.
+if os.environ.get("AUTOSTART_POLLER", "1").strip() != "0":
     start_poller()
 
 if __name__ == "__main__":
