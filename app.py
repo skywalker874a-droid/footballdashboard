@@ -204,18 +204,6 @@ def api_debug():
     })
 
 
-@app.route("/api/debug/poll")
-def api_debug_poll():
-    """Run one poll synchronously and report the outcome (diagnostics)."""
-    import traceback
-    try:
-        poll_once()
-        return jsonify({"ok": True, "tracked": len(STORE), "meta": META})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"ok": False, "error": str(e),
-                        "trace": traceback.format_exc()[-2000:]})
-
-
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
