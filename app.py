@@ -181,6 +181,35 @@ def api_meta():
     return jsonify({"meta": META, "interval": POLL_INTERVAL, "tracked": len(STORE)})
 
 
+@app.route("/api/debug")
+def api_debug():
+    names = [t.name for t in threading.enumerate()]
+    return jsonify({
+        "poller_started_flag": _poller_started,
+        "poller_thread_alive": any(t.name == "poller" and t.is_alive()
+                                   for t in threading.enumerate()),
+        "threads": names,
+        "key_present": bool(KEY),
+        "key_len": len(KEY) if KEY else 0,
+        "autostart_env": repr(os.environ.get("AUTOSTART_POLLER")),
+        "poll_interval": POLL_INTERVAL,
+        "last_poll": META.get("last_poll"),
+        "error": META.get("error"),
+    })
+
+
+@app.route("/api/debug/poll")
+def api_debug_poll():
+    """Run one poll synchronously and report the outcome (diagnostics)."""
+    import traceback
+    try:
+        poll_once()
+        return jsonify({"ok": True, "tracked": len(STORE), "meta": META})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e),
+                        "trace": traceback.format_exc()[-2000:]})
+
+
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
@@ -202,7 +231,7 @@ def start_poller():
             return
         _poller_started = True
     print(f"[poller] started (interval {POLL_INTERVAL}s)", flush=True)
-    threading.Thread(target=poller_loop, daemon=True).start()
+    threading.Thread(target=poller_loop, name="poller", daemon=True).start()
 
 
 def main():
