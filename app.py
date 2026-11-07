@@ -150,6 +150,14 @@ def poller_loop():
 
 
 # ---------- API ----------
+@app.before_request
+def _ensure_poller_running():
+    # Guarantees the poller runs in the gunicorn worker that serves requests,
+    # regardless of fork/preload timing. Idempotent and cheap.
+    if not _poller_alive():
+        start_poller()
+
+
 @app.route("/api/matches")
 def api_matches():
     with _lock:
@@ -185,9 +193,7 @@ def api_meta():
 def api_debug():
     names = [t.name for t in threading.enumerate()]
     return jsonify({
-        "poller_started_flag": _poller_started,
-        "poller_thread_alive": any(t.name == "poller" and t.is_alive()
-                                   for t in threading.enumerate()),
+        "poller_thread_alive": _poller_alive(),
         "threads": names,
         "key_present": bool(KEY),
         "key_len": len(KEY) if KEY else 0,
@@ -215,23 +221,26 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
-_poller_started = False
 _poller_lock = threading.Lock()
 
 
+def _poller_alive():
+    # Use the real thread registry (not a boolean flag): a flag set before a
+    # gunicorn fork is copied into the worker, but the thread itself is not.
+    return any(t.name == "poller" and t.is_alive() for t in threading.enumerate())
+
+
 def start_poller():
-    """Start the background poller once (idempotent). Safe to call from both
-    `main()` (local run) and module import (gunicorn/WSGI)."""
-    global _poller_started
+    """Start the background poller if it isn't already running in THIS process.
+    Fork-safe and idempotent — called at import, on first request, and in main()."""
     with _poller_lock:
-        if _poller_started:
+        if _poller_alive():
             return
         if not KEY:
             print("[poller] NOT started: APISPORTS_KEY is not set", flush=True)
             return
-        _poller_started = True
-    print(f"[poller] started (interval {POLL_INTERVAL}s)", flush=True)
-    threading.Thread(target=poller_loop, name="poller", daemon=True).start()
+        threading.Thread(target=poller_loop, name="poller", daemon=True).start()
+        print(f"[poller] started (interval {POLL_INTERVAL}s)", flush=True)
 
 
 def main():
