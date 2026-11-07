@@ -39,6 +39,8 @@ SKIP = set()        # fids confirmed to have no stats — never polled again
 META = {"last_poll": None, "live_count": 0, "with_stats": 0,
         "counts": {"full": 0, "partial": 0, "checking": 0, "skipped": 0},
         "requests_remaining": None, "error": None}
+POLL_DBG = {"loop_iters": 0, "phase": "init", "started_at": None,
+            "finished_at": None, "match_i": 0, "n": 0}
 
 
 def _iso(dt=None):
@@ -66,10 +68,15 @@ def poll_once():
     """One polling cycle. Only matches with stats are polled and stored; a match
     confirmed to have no stats (after MAX_NONE_CHECKS) is blacklisted and never
     polled again, so it costs no further API requests."""
+    POLL_DBG["phase"] = "fetch_live"
     fixtures = sofa_api.live_fixtures(KEY)
     live_ids = set()
     counts = {"full": 0, "partial": 0, "checking": 0, "skipped": 0}
-    for fx in fixtures:
+    POLL_DBG["n"] = len(fixtures)
+    POLL_DBG["match_i"] = 0
+    for i, fx in enumerate(fixtures):
+        POLL_DBG["match_i"] = i
+        POLL_DBG["phase"] = f"match {i+1}/{len(fixtures)}"
         fid = fx["fixture"]["id"]
         live_ids.add(fid)
 
@@ -142,10 +149,16 @@ def poll_once():
 
 def poller_loop():
     while True:
+        POLL_DBG["loop_iters"] += 1
+        POLL_DBG["phase"] = "polling"
+        POLL_DBG["started_at"] = _iso()
         try:
             poll_once()
+            POLL_DBG["phase"] = "sleeping"
         except Exception as e:  # noqa: BLE001
             META.update(error=str(e), last_poll=_iso())
+            POLL_DBG["phase"] = "error: " + str(e)[:120]
+        POLL_DBG["finished_at"] = _iso()
         time.sleep(POLL_INTERVAL)
 
 
@@ -202,6 +215,7 @@ def api_debug():
         "poll_interval": POLL_INTERVAL,
         "last_poll": META.get("last_poll"),
         "error": META.get("error"),
+        "poll_dbg": POLL_DBG,
     })
 
 
