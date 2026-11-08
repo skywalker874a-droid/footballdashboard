@@ -20,9 +20,13 @@ from datetime import datetime, timezone
 
 from flask import Flask, jsonify, send_from_directory
 
+import socket
+
 import core
 import db
 import sofa_api
+
+VERSION = "v4-odds-dns-bypass"  # bump each deploy so /api/debug confirms what's live
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))   # seconds (5 min)
 PORT = int(os.environ.get("PORT", "8000"))
@@ -233,6 +237,9 @@ def api_meta():
 def api_debug():
     names = [t.name for t in threading.enumerate()]
     return jsonify({
+        "version": VERSION,
+        "resolver_patched": socket.getaddrinfo is sofa_api._patched_getaddrinfo,
+        "static_ips": sofa_api.STATIC_IPS,
         "pid": os.getpid(),
         "poller_thread_alive": _poller_alive(),
         "threads": names,
