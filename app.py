@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, send_from_directory
 
 import core
+import db
 import sofa_api
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))   # seconds (5 min)
@@ -72,6 +73,7 @@ def poll_once():
     fixtures = sofa_api.live_fixtures(KEY)
     live_ids = set()
     counts = {"full": 0, "partial": 0, "checking": 0, "skipped": 0}
+    archive_rows = []
     POLL_DBG["n"] = len(fixtures)
     POLL_DBG["match_i"] = 0
     for i, fx in enumerate(fixtures):
@@ -115,6 +117,7 @@ def poll_once():
             home_vals, away_vals, prev[0] if prev else None, prev[1] if prev else None)
         entry = {
             "id": fid,
+            "home_id": teams["home"].get("id"), "away_id": teams["away"].get("id"),
             "home": {"name": teams["home"]["name"], "logo": teams["home"].get("logo")},
             "away": {"name": teams["away"]["name"], "logo": teams["away"].get("logo")},
             "score": {"home": goals.get("home"), "away": goals.get("away")},
@@ -129,6 +132,9 @@ def poll_once():
             "stats_home": core.raw_table(st[0]), "stats_away": core.raw_table(st[1]),
             "updated_at": _iso(),
         }
+        changed = (prev is None) or (home_vals != prev[0]) or (away_vals != prev[1])
+        archive_rows.append(
+            db.row_from(entry, core.full_stats(st[0]), core.full_stats(st[1]), changed))
         with _lock:
             STORE[fid] = entry
         PREV[fid] = (home_vals, away_vals)
@@ -145,6 +151,7 @@ def poll_once():
     SKIP.intersection_update(live_ids)
     META.update(last_poll=_iso(), live_count=len(fixtures),
                 with_stats=counts["full"] + counts["partial"], counts=counts, error=None)
+    db.insert_rows(archive_rows)  # best-effort archival; never breaks the live view
 
 
 CYCLE_DEADLINE = int(os.environ.get("CYCLE_DEADLINE", "90"))  # max secs per poll cycle
@@ -235,6 +242,11 @@ def api_debug():
     })
 
 
+@app.route("/api/archive")
+def api_archive():
+    return jsonify(db.STATUS)
+
+
 @app.route("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
@@ -258,6 +270,7 @@ def start_poller():
         if not KEY:
             print("[poller] NOT started: APISPORTS_KEY is not set", flush=True)
             return
+        db.init_db()  # create the archival table if DATABASE_URL is set (no-op otherwise)
         threading.Thread(target=poller_loop, name="poller", daemon=True).start()
         print(f"[poller] started (interval {POLL_INTERVAL}s)", flush=True)
 

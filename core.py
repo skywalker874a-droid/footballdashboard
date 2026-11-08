@@ -79,6 +79,25 @@ def raw_table(block):
     return out
 
 
+# Full 17-stat set for archival: (db_column, raw API stat name)
+FULL_STATS = [
+    ("possession", "Ball Possession"), ("xg", "expected_goals"),
+    ("shots_total", "Total Shots"), ("shots_on", "Shots on Goal"),
+    ("shots_off", "Shots off Goal"), ("blocked", "Blocked Shots"),
+    ("box_in", "Shots insidebox"), ("box_out", "Shots outsidebox"),
+    ("corners", "Corner Kicks"), ("offsides", "Offsides"), ("fouls", "Fouls"),
+    ("yellow", "Yellow Cards"), ("red", "Red Cards"), ("gk_saves", "Goalkeeper Saves"),
+    ("passes", "Total passes"), ("passes_acc", "Passes accurate"),
+    ("passes_pct", "Passes %"),
+]
+
+
+def full_stats(block):
+    """All 17 stats as {db_column: numeric} for one team (missing -> 0)."""
+    d = {s["type"]: s["value"] for s in block.get("statistics", [])}
+    return {col: num(d.get(name)) for col, name in FULL_STATS}
+
+
 def _share(h, a):
     t = h + a
     return 0.5 if t <= 0 else h / t
