@@ -22,8 +22,8 @@ except Exception:  # pragma: no cover
 
 API_HOST = "v3.football.api-sports.io"
 BASE_URL = f"https://{API_HOST}"
-CONNECT_TIMEOUT = 8
-READ_TIMEOUT = 20
+CONNECT_TIMEOUT = 5
+READ_TIMEOUT = 12
 
 # ---- resolver bypass for the API host ----
 # Known-good Cloudflare IPs (verified) used instantly as the primary answer, so we

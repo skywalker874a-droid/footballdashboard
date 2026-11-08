@@ -26,7 +26,7 @@ import core
 import db
 import sofa_api
 
-VERSION = "v4-odds-dns-bypass"  # bump each deploy so /api/debug confirms what's live
+VERSION = "v5-netdiag"  # bump each deploy so /api/debug confirms what's live
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))   # seconds (5 min)
 PORT = int(os.environ.get("PORT", "8000"))
@@ -162,7 +162,8 @@ def poll_once():
     db.insert_rows(archive_rows)  # best-effort archival; never breaks the live view
 
 
-CYCLE_DEADLINE = int(os.environ.get("CYCLE_DEADLINE", "90"))  # max secs per poll cycle
+CYCLE_DEADLINE = int(os.environ.get("CYCLE_DEADLINE", "45"))   # max secs per poll cycle
+RETRY_INTERVAL = int(os.environ.get("RETRY_INTERVAL", "45"))   # retry sooner after a failed cycle
 
 
 def _run_poll_cycle():
@@ -187,10 +188,13 @@ def poller_loop():
         t = threading.Thread(target=_run_poll_cycle, name="poll-cycle", daemon=True)
         t.start()
         t.join(timeout=CYCLE_DEADLINE)
-        if t.is_alive():
+        stuck = t.is_alive()
+        if stuck:
             POLL_DBG["phase"] = f"cycle stuck >{CYCLE_DEADLINE}s (network); retrying"
-            META["error"] = f"poll cycle exceeded {CYCLE_DEADLINE}s (likely DNS/network); retrying"
-        time.sleep(POLL_INTERVAL)
+            META["error"] = f"poll cycle exceeded {CYCLE_DEADLINE}s (likely network); retrying soon"
+        # retry soon after a failed/stuck cycle so we catch intermittent connectivity
+        failed = stuck or bool(META.get("error"))
+        time.sleep(RETRY_INTERVAL if failed else POLL_INTERVAL)
 
 
 # ---------- API ----------
@@ -256,6 +260,42 @@ def api_debug():
 @app.route("/api/archive")
 def api_archive():
     return jsonify(db.STATUS)
+
+
+@app.route("/api/netdiag")
+def api_netdiag():
+    """Time each network layer to api-sports.io to pinpoint where it hangs."""
+    import ssl
+    import time as _t
+    import requests as _rq
+    out = {}
+    for ip in sofa_api.STATIC_IPS:
+        t = _t.time()
+        try:
+            c = socket.create_connection((ip, 443), timeout=6)
+            out[f"tcp {ip}"] = f"ok {round(_t.time()-t,2)}s"
+            t2 = _t.time()
+            ctx = ssl.create_default_context()
+            ss = ctx.wrap_socket(c, server_hostname=sofa_api.API_HOST)
+            out[f"tls {ip}"] = f"ok {round(_t.time()-t2,2)}s"
+            ss.close()
+        except Exception as e:  # noqa: BLE001
+            out[f"tcp/tls {ip}"] = f"ERR {type(e).__name__}: {str(e)[:50]} ({round(_t.time()-t,2)}s)"
+    t = _t.time()
+    try:
+        r = _rq.get("https://1.1.1.1/dns-query",
+                    params={"name": sofa_api.API_HOST, "type": "A"},
+                    headers={"Accept": "application/dns-json"}, timeout=(4, 5))
+        out["doh 1.1.1.1"] = f"ok {r.status_code} {round(_t.time()-t,2)}s"
+    except Exception as e:  # noqa: BLE001
+        out["doh 1.1.1.1"] = f"ERR {type(e).__name__} ({round(_t.time()-t,2)}s)"
+    t = _t.time()
+    try:
+        st = sofa_api.account_status(KEY)
+        out["api /status"] = f"ok {round(_t.time()-t,2)}s plan={st.get('subscription',{}).get('plan')}"
+    except Exception as e:  # noqa: BLE001
+        out["api /status"] = f"ERR {type(e).__name__}: {str(e)[:70]} ({round(_t.time()-t,2)}s)"
+    return jsonify(out)
 
 
 @app.route("/")
