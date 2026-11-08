@@ -98,6 +98,24 @@ def full_stats(block):
     return {col: num(d.get(name)) for col, name in FULL_STATS}
 
 
+def match_winner_odds(odds_response):
+    """Extract live 1X2 (Fulltime Result) odds -> {home, draw, away} (None if absent)."""
+    out = {"home": None, "draw": None, "away": None}
+    if not odds_response:
+        return out
+    for bet in odds_response[0].get("odds", []):
+        if bet.get("id") == 59 or str(bet.get("name", "")).lower() in ("fulltime result", "match winner"):
+            for v in bet.get("values", []):
+                k = str(v.get("value", "")).lower()
+                if k in out and out[k] is None:
+                    try:
+                        out[k] = float(v.get("odd"))
+                    except (TypeError, ValueError):
+                        pass
+            break
+    return out
+
+
 def _share(h, a):
     t = h + a
     return 0.5 if t <= 0 else h / t

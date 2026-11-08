@@ -119,5 +119,10 @@ def statistics(key, fixture_id):
     return _get("/fixtures/statistics", {"fixture": fixture_id}, key).get("response", [])
 
 
+def live_odds(key, fixture_id):
+    """Live in-play odds for one fixture (empty list if none)."""
+    return _get("/odds/live", {"fixture": fixture_id}, key).get("response", [])
+
+
 def account_status(key):
     return _get("/status", {}, key).get("response", {})

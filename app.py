@@ -133,8 +133,12 @@ def poll_once():
             "updated_at": _iso(),
         }
         changed = (prev is None) or (home_vals != prev[0]) or (away_vals != prev[1])
+        try:
+            odds = core.match_winner_odds(sofa_api.live_odds(KEY, fid))
+        except Exception:
+            odds = None  # odds often unavailable for a match; store nulls
         archive_rows.append(
-            db.row_from(entry, core.full_stats(st[0]), core.full_stats(st[1]), changed))
+            db.row_from(entry, core.full_stats(st[0]), core.full_stats(st[1]), changed, odds))
         with _lock:
             STORE[fid] = entry
         PREV[fid] = (home_vals, away_vals)

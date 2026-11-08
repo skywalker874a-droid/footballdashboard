@@ -37,7 +37,8 @@ _BASE_COLS = [
     "coverage", "dominance_home", "momentum_home", "stats_changed",
 ]
 _STAT_COLS = [f"home_{c}" for c, _ in core.FULL_STATS] + [f"away_{c}" for c, _ in core.FULL_STATS]
-ALL_COLS = _BASE_COLS + _STAT_COLS
+_ODDS_COLS = ["odd_home", "odd_draw", "odd_away"]  # live 1X2 (Fulltime Result)
+ALL_COLS = _BASE_COLS + _STAT_COLS + _ODDS_COLS
 
 
 def _connect():
@@ -67,11 +68,16 @@ def init_db():
         STATUS["last_error"] = "DATABASE_URL or psycopg2 missing"
         return False
     cols_sql = ",\n  ".join(f"{c} {_coltype(c)}" for c in ALL_COLS)
+    # ADD COLUMN IF NOT EXISTS makes this idempotent AND evolves an existing table
+    # (e.g. adds the odds columns to a table created before they existed).
+    alters = "\n".join(
+        f"ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS {c} {_coltype(c)};" for c in ALL_COLS)
     ddl = f"""
     CREATE TABLE IF NOT EXISTS snapshots (
       id BIGSERIAL PRIMARY KEY,
       {cols_sql}
     );
+    {alters}
     CREATE INDEX IF NOT EXISTS idx_snap_fixture_ts ON snapshots (fixture_id, scan_ts);
     CREATE INDEX IF NOT EXISTS idx_snap_ts ON snapshots (scan_ts);
     CREATE INDEX IF NOT EXISTS idx_snap_league ON snapshots (league);
@@ -95,8 +101,9 @@ def init_db():
             conn.close()
 
 
-def row_from(entry, home_stats, away_stats, changed):
+def row_from(entry, home_stats, away_stats, changed, odds=None):
     """Build an ordered row tuple matching ALL_COLS from a poller entry."""
+    odds = odds or {}
     r = {
         "scan_ts": entry["updated_at"],
         "fixture_id": entry["id"],
@@ -108,6 +115,7 @@ def row_from(entry, home_stats, away_stats, changed):
         "coverage": entry["coverage"],
         "dominance_home": entry["dominance"], "momentum_home": entry["momentum"],
         "stats_changed": changed,
+        "odd_home": odds.get("home"), "odd_draw": odds.get("draw"), "odd_away": odds.get("away"),
     }
     for c, _ in core.FULL_STATS:
         r[f"home_{c}"] = home_stats.get(c)
