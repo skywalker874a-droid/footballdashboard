@@ -40,15 +40,11 @@ _STAT_COLS = [f"home_{c}" for c, _ in core.FULL_STATS] + [f"away_{c}" for c, _ i
 ALL_COLS = _BASE_COLS + _STAT_COLS
 
 
-def _dsn():
-    dsn = DATABASE_URL
-    if dsn and "sslmode=" not in dsn:
-        dsn += ("&" if "?" in dsn else "?") + "sslmode=require"
-    return dsn
-
-
 def _connect():
-    return psycopg2.connect(_dsn(), connect_timeout=10)
+    # Pass sslmode as a real connection parameter (psycopg2 merges it into the URI)
+    # rather than string-appending to the URL — appending breaks when the password
+    # contains characters like '?', which would corrupt the parsed database name.
+    return psycopg2.connect(DATABASE_URL, sslmode="require", connect_timeout=10)
 
 
 def _coltype(col):
