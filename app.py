@@ -231,12 +231,31 @@ def _item_from_dbrow(r):
     }
 
 
+_PCT_COLS = {"possession", "passes_pct"}
+
+
+def _fmt_stat(col, v):
+    """Render a DB NUMERIC back the way the live feed showed it: integers without a
+    trailing .0, percentages with %, xG/decimals as-is."""
+    if v is None:
+        return "-"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v
+    if col in _PCT_COLS:
+        return f"{f:g}%"
+    if f == int(f):
+        return str(int(f))
+    return f"{f:g}"
+
+
 def _detail_from_dbrow(r):
     item = _item_from_dbrow(r)
     sh, sa = {}, {}
     for col, rawname in core.FULL_STATS:
-        sh[rawname] = r.get(f"home_{col}")
-        sa[rawname] = r.get(f"away_{col}")
+        sh[rawname] = _fmt_stat(col, r.get(f"home_{col}"))
+        sa[rawname] = _fmt_stat(col, r.get(f"away_{col}"))
     item["stats_home"], item["stats_away"] = sh, sa
     item["odds"] = {"home": _fnum(r.get("odd_home")), "draw": _fnum(r.get("odd_draw")),
                     "away": _fnum(r.get("odd_away"))}
