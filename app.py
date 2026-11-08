@@ -27,7 +27,7 @@ import db
 import notify
 import sofa_api
 
-VERSION = "v8-telegram-alerts"  # bump each deploy so /api/debug confirms what's live
+VERSION = "v9-alert-stats"  # bump each deploy so /api/debug confirms what's live
 
 # Telegram alert thresholds (env-overridable)
 ALERT_MIN_MINUTE = int(os.environ.get("ALERT_MIN_MINUTE", "15"))   # ignore before this minute
@@ -82,9 +82,20 @@ def _alert_text(entry, dom):
     aw = entry["score"]["away"] or 0
     lead = h if dom >= 50 else a
     pct = dom if dom >= 50 else 100 - dom
+    sh = entry.get("stats_home", {})
+    sa = entry.get("stats_away", {})
+
+    def g(k):
+        return sh.get(k, "-"), sa.get(k, "-")
+
+    poss, xg, ts, son, cor = g("Ball Possession"), g("expected_goals"), \
+        g("Total Shots"), g("Shots on Goal"), g("Corner Kicks")
+    stats_line = (f"Poss {poss[0]}-{poss[1]} · xG {xg[0]}-{xg[1]} · "
+                  f"Shots {ts[0]}-{ts[1]} (on {son[0]}-{son[1]}) · Corners {cor[0]}-{cor[1]}")
     return (f"⚡ Dominance alert — {lead} on top\n"
             f"{h} {hs}-{aw} {a}   {entry['minute']}'  ({entry.get('league') or ''})\n"
-            f"Dominance {round(pct)}% vs {round(100 - pct)}%")
+            f"Dominance {round(pct)}% vs {round(100 - pct)}%\n"
+            f"{stats_line}")
 
 
 def _check_alert(entry):
