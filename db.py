@@ -81,6 +81,11 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_snap_fixture_ts ON snapshots (fixture_id, scan_ts);
     CREATE INDEX IF NOT EXISTS idx_snap_ts ON snapshots (scan_ts);
     CREATE INDEX IF NOT EXISTS idx_snap_league ON snapshots (league);
+    CREATE TABLE IF NOT EXISTS alerts (
+      fixture_id BIGINT PRIMARY KEY,
+      qualifying BOOLEAN DEFAULT false,
+      updated TIMESTAMPTZ
+    );
     """
     conn = None
     try:
@@ -162,6 +167,49 @@ def latest_one(fixture_id):
     if not rows:
         return None
     return dict(zip(ALL_COLS, rows[0]))
+
+
+def claim_alert(fixture_id):
+    """Atomically mark a match as 'qualifying' and return True ONLY for the caller
+    that flipped it from not-qualifying -> qualifying. Across multiple workers,
+    exactly one wins, so exactly one Telegram message is sent per qualifying event."""
+    if not (DATABASE_URL and psycopg2):
+        return False
+    sql = ("INSERT INTO alerts (fixture_id, qualifying, updated) VALUES (%s, true, now()) "
+           "ON CONFLICT (fixture_id) DO UPDATE SET qualifying = true, updated = now() "
+           "WHERE alerts.qualifying = false RETURNING fixture_id")
+    conn = None
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute(sql, (fixture_id,))
+            won = cur.fetchone() is not None
+        conn.commit()
+        return won
+    except Exception as e:  # noqa: BLE001
+        STATUS["last_error"] = f"claim_alert: {e}"
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def clear_alert(fixture_id):
+    """Reset a match to not-qualifying so it can alert again if it re-qualifies."""
+    if not (DATABASE_URL and psycopg2):
+        return
+    conn = None
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE alerts SET qualifying = false, updated = now() "
+                        "WHERE fixture_id = %s AND qualifying = true", (fixture_id,))
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        STATUS["last_error"] = f"clear_alert: {e}"
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def insert_rows(rows):

@@ -24,9 +24,16 @@ import socket
 
 import core
 import db
+import notify
 import sofa_api
 
-VERSION = "v7-db-read"  # bump each deploy so /api/debug confirms what's live
+VERSION = "v8-telegram-alerts"  # bump each deploy so /api/debug confirms what's live
+
+# Telegram alert thresholds (env-overridable)
+ALERT_MIN_MINUTE = int(os.environ.get("ALERT_MIN_MINUTE", "15"))   # ignore before this minute
+ALERT_MAX_MARGIN = int(os.environ.get("ALERT_MAX_MARGIN", "2"))    # ignore if goal gap > this
+ALERT_DOM = float(os.environ.get("ALERT_DOM", "60"))              # alert at >= this or <= 100-this
+_alert_state = {}  # fid -> bool: this worker's last-seen qualifying state (transition tracking)
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))   # seconds (5 min)
 PORT = int(os.environ.get("PORT", "8000"))
@@ -67,6 +74,41 @@ def classify(st):
         return "none", d0, d1
     has_xg = (d0.get("expected_goals") not in (None, "")) or (d1.get("expected_goals") not in (None, ""))
     return ("full" if has_xg else "partial"), d0, d1
+
+
+def _alert_text(entry, dom):
+    h, a = entry["home"]["name"], entry["away"]["name"]
+    hs = entry["score"]["home"] or 0
+    aw = entry["score"]["away"] or 0
+    lead = h if dom >= 50 else a
+    pct = dom if dom >= 50 else 100 - dom
+    return (f"⚡ Dominance alert — {lead} on top\n"
+            f"{h} {hs}-{aw} {a}   {entry['minute']}'  ({entry.get('league') or ''})\n"
+            f"Dominance {round(pct)}% vs {round(100 - pct)}%")
+
+
+def _check_alert(entry):
+    """Telegram alert when a match crosses the dominance threshold (minute/goal-gap
+    filtered). Fires on the not-qualifying -> qualifying transition; DB claim makes
+    it exactly once across workers; re-arms when it stops qualifying."""
+    if not notify.enabled():
+        return
+    fid = entry["id"]
+    dom = entry["dominance"]
+    minute = entry["minute"]
+    hs = entry["score"]["home"] or 0
+    aw = entry["score"]["away"] or 0
+    qualifies = (dom is not None and minute is not None and minute >= ALERT_MIN_MINUTE
+                 and abs(hs - aw) <= ALERT_MAX_MARGIN
+                 and (dom >= ALERT_DOM or dom <= 100 - ALERT_DOM))
+    was = _alert_state.get(fid, False)
+    if qualifies and not was:
+        _alert_state[fid] = True
+        if db.claim_alert(fid):
+            notify.send(_alert_text(entry, dom))
+    elif not qualifies and was:
+        _alert_state[fid] = False
+        db.clear_alert(fid)
 
 
 def poll_once():
@@ -146,6 +188,7 @@ def poll_once():
         with _lock:
             STORE[fid] = entry
         PREV[fid] = (home_vals, away_vals)
+        _check_alert(entry)
 
     # forget everything about matches that are no longer live
     with _lock:
@@ -156,6 +199,9 @@ def poll_once():
     for fid in list(NONE_STREAK.keys()):
         if fid not in live_ids:
             NONE_STREAK.pop(fid, None)
+    for fid in list(_alert_state.keys()):
+        if fid not in live_ids:
+            _alert_state.pop(fid, None)
     SKIP.intersection_update(live_ids)
     META.update(last_poll=_iso(), live_count=len(fixtures),
                 with_stats=counts["full"] + counts["partial"], counts=counts, error=None)
@@ -328,6 +374,14 @@ def api_debug():
 @app.route("/api/archive")
 def api_archive():
     return jsonify(db.STATUS)
+
+
+@app.route("/api/alerts")
+def api_alerts():
+    return jsonify({**notify.STATUS,
+                    "thresholds": {"min_minute": ALERT_MIN_MINUTE,
+                                   "max_goal_margin": ALERT_MAX_MARGIN,
+                                   "dominance": ALERT_DOM}})
 
 
 @app.route("/api/netdiag")
