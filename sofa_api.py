@@ -1,11 +1,17 @@
 """API-Football (api-sports.io) client.
 
-Uses a single pooled, keep-alive requests.Session so the TCP/TLS connection is
-established once and reused across calls. This avoids a fresh DNS lookup + connect
-on every request (the stdlib-urllib approach did one per call, which hung
-repeatedly under network flakiness and stalled the poller). Bounded connect/read
-timeouts + retries keep any single call from wedging.
+Two robustness measures, both learned from Render:
+1. A pooled, keep-alive requests.Session (connection reused across calls).
+2. A DNS-over-HTTPS fallback for the API host. Render's system resolver has been
+   observed to hang indefinitely on `v3.football.api-sports.io` (while resolving
+   everything else fine), which wedged the poller. We resolve that host via
+   Cloudflare/Google DoH — contacted by literal IP, so it needs no system DNS —
+   and feed the IP into socket.getaddrinfo transparently. TLS SNI and certificate
+   verification still use the hostname, so nothing else changes.
 """
+import socket
+import time
+
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -16,9 +22,64 @@ except Exception:  # pragma: no cover
 
 API_HOST = "v3.football.api-sports.io"
 BASE_URL = f"https://{API_HOST}"
-CONNECT_TIMEOUT = 8   # seconds to establish a connection
-READ_TIMEOUT = 20     # seconds to read the response
+CONNECT_TIMEOUT = 8
+READ_TIMEOUT = 20
 
+# ---- resolver bypass for the API host ----
+# Known-good Cloudflare IPs (verified) used instantly as the primary answer, so we
+# never touch Render's hanging resolver for this host. DoH refreshes them in case
+# Cloudflare's anycast IPs change over time.
+STATIC_IPS = ["104.20.39.36", "172.66.164.245"]
+_doh_ips = []
+_doh_ts = 0.0
+_DOH_TTL = 600  # refresh at most every 10 min
+
+
+def _resolve_doh(host):
+    for url in ("https://1.1.1.1/dns-query", "https://8.8.8.8/resolve"):
+        try:
+            r = requests.get(
+                url, params={"name": host, "type": "A"},
+                headers={"Accept": "application/dns-json"}, timeout=(3, 4),
+            )
+            answers = r.json().get("Answer", [])
+            ips = [a["data"] for a in answers if a.get("type") == 1]
+            if ips:
+                return ips
+        except Exception:
+            continue
+    return []
+
+
+def _host_ips():
+    global _doh_ips, _doh_ts
+    now = time.time()
+    if now - _doh_ts >= _DOH_TTL:
+        _doh_ts = now  # set first so a failing DoH doesn't retry until next TTL
+        ips = _resolve_doh(API_HOST)
+        if ips:
+            _doh_ips = ips
+    return _doh_ips or STATIC_IPS
+
+
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _patched_getaddrinfo(host, *args, **kwargs):
+    if host == API_HOST:
+        for ip in _host_ips():
+            try:
+                # resolve the IP literal (instant, no system DNS) in place of the host
+                return _orig_getaddrinfo(ip, *args, **kwargs)
+            except Exception:
+                continue
+    return _orig_getaddrinfo(host, *args, **kwargs)
+
+
+# only our API host is intercepted; every other host uses the normal resolver
+socket.getaddrinfo = _patched_getaddrinfo
+
+# ---- pooled session ----
 _session = None
 
 
