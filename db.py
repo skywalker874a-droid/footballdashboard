@@ -80,9 +80,12 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_snap_ts ON snapshots (scan_ts);
     CREATE INDEX IF NOT EXISTS idx_snap_league ON snapshots (league);
     """
+    conn = None
     try:
-        with _connect() as conn, conn.cursor() as cur:
+        conn = _connect()
+        with conn.cursor() as cur:
             cur.execute(ddl)
+        conn.commit()
         STATUS["table_ready"] = True
         STATUS["last_error"] = None
         print("[db] snapshots table ready", flush=True)
@@ -91,6 +94,9 @@ def init_db():
         STATUS["last_error"] = f"init: {e}"
         print(f"[db] init failed: {e}", flush=True)
         return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def row_from(entry, home_stats, away_stats, changed):
@@ -120,12 +126,18 @@ def insert_rows(rows):
     if not STATUS["table_ready"] and not init_db():
         return
     sql = f"INSERT INTO snapshots ({', '.join(ALL_COLS)}) VALUES %s"
+    conn = None
     try:
-        with _connect() as conn, conn.cursor() as cur:
+        conn = _connect()
+        with conn.cursor() as cur:
             execute_values(cur, sql, rows)
+        conn.commit()
         STATUS["rows_written"] += len(rows)
         STATUS["last_write"] = datetime.now(timezone.utc).isoformat()
         STATUS["last_error"] = None
     except Exception as e:  # noqa: BLE001
         STATUS["last_error"] = f"insert: {e}"
         print(f"[db] insert failed: {e}", flush=True)
+    finally:
+        if conn is not None:
+            conn.close()
