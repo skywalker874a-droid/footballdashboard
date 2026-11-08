@@ -65,18 +65,42 @@ def _host_ips():
 _orig_getaddrinfo = socket.getaddrinfo
 
 
+def _is_ipv4(h):
+    try:
+        socket.inet_aton(h)
+        return isinstance(h, str) and h.count(".") == 3
+    except (OSError, TypeError):
+        return False
+
+
+def _manual(ip, args, kwargs):
+    # build a getaddrinfo-style result WITHOUT calling the system resolver, so a
+    # hung/broken resolver (seen on Render) can't block us even for numeric IPs
+    port = args[0] if args else kwargs.get("port", 0)
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        port = 443
+    typ = args[2] if len(args) > 2 else kwargs.get("type", socket.SOCK_STREAM)
+    proto = args[3] if len(args) > 3 else kwargs.get("proto", 0)
+    return [(socket.AF_INET, typ or socket.SOCK_STREAM, proto, "", (ip, port))]
+
+
 def _patched_getaddrinfo(host, *args, **kwargs):
+    # our API host -> pinned Cloudflare IPs, built by hand (no system resolver)
     if host == API_HOST:
+        res = []
         for ip in _host_ips():
-            try:
-                # resolve the IP literal (instant, no system DNS) in place of the host
-                return _orig_getaddrinfo(ip, *args, **kwargs)
-            except Exception:
-                continue
+            res += _manual(ip, args, kwargs)
+        if res:
+            return res
+    # any numeric IP (e.g. the DoH servers) -> build by hand, bypass the resolver
+    if _is_ipv4(host):
+        return _manual(host, args, kwargs)
+    # everything else (e.g. Supabase) uses the normal resolver
     return _orig_getaddrinfo(host, *args, **kwargs)
 
 
-# only our API host is intercepted; every other host uses the normal resolver
 socket.getaddrinfo = _patched_getaddrinfo
 
 # ---- pooled session ----

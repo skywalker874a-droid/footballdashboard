@@ -26,7 +26,7 @@ import core
 import db
 import sofa_api
 
-VERSION = "v5-netdiag"  # bump each deploy so /api/debug confirms what's live
+VERSION = "v6-manual-resolve"  # bump each deploy so /api/debug confirms what's live
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))   # seconds (5 min)
 PORT = int(os.environ.get("PORT", "8000"))
