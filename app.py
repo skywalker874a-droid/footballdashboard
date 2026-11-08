@@ -26,7 +26,7 @@ import core
 import db
 import sofa_api
 
-VERSION = "v6-manual-resolve"  # bump each deploy so /api/debug confirms what's live
+VERSION = "v7-db-read"  # bump each deploy so /api/debug confirms what's live
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))   # seconds (5 min)
 PORT = int(os.environ.get("PORT", "8000"))
@@ -206,25 +206,74 @@ def _ensure_poller_running():
         start_poller()
 
 
+def _fnum(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_ts(v):
+    return v.isoformat() if hasattr(v, "isoformat") else v
+
+
+def _item_from_dbrow(r):
+    return {
+        "id": r["fixture_id"],
+        "home": {"name": r["home_team"], "logo": None},
+        "away": {"name": r["away_team"], "logo": None},
+        "score": {"home": r["home_score"], "away": r["away_score"]},
+        "minute": r["minute"], "status": r["status"],
+        "league": r["league"], "country": r["country"], "league_logo": None,
+        "coverage": r["coverage"],
+        "dominance": _fnum(r["dominance_home"]), "momentum": _fnum(r["momentum_home"]),
+        "updated_at": _iso_ts(r["scan_ts"]),
+    }
+
+
+def _detail_from_dbrow(r):
+    item = _item_from_dbrow(r)
+    sh, sa = {}, {}
+    for col, rawname in core.FULL_STATS:
+        sh[rawname] = r.get(f"home_{col}")
+        sa[rawname] = r.get(f"away_{col}")
+    item["stats_home"], item["stats_away"] = sh, sa
+    item["odds"] = {"home": _fnum(r.get("odd_home")), "draw": _fnum(r.get("odd_draw")),
+                    "away": _fnum(r.get("odd_away"))}
+    return item
+
+
 @app.route("/api/matches")
 def api_matches():
-    with _lock:
-        items = [{
-            "id": m["id"], "home": m["home"], "away": m["away"], "score": m["score"],
-            "minute": m["minute"], "status": m["status"], "league": m["league"],
-            "country": m["country"], "league_logo": m["league_logo"],
-            "coverage": m["coverage"],
-            "dominance": m["dominance"], "momentum": m["momentum"],
-            "updated_at": m["updated_at"],
-        } for m in STORE.values()]
-    # full first, then partial, then none; within a tier most lopsided first
+    rows = db.latest_live()  # shared DB view: works regardless of which worker polled
+    if rows is not None:
+        items = [_item_from_dbrow(r) for r in rows]
+        from collections import Counter
+        cc = Counter(i["coverage"] for i in items)
+        last = max((i["updated_at"] for i in items), default=None)
+        meta = {"last_poll": last, "live_count": len(items), "source": "db",
+                "counts": {"full": cc.get("full", 0), "partial": cc.get("partial", 0),
+                           "checking": 0, "skipped": 0}}
+    else:
+        with _lock:
+            items = [{
+                "id": m["id"], "home": m["home"], "away": m["away"], "score": m["score"],
+                "minute": m["minute"], "status": m["status"], "league": m["league"],
+                "country": m["country"], "league_logo": m["league_logo"],
+                "coverage": m["coverage"], "dominance": m["dominance"],
+                "momentum": m["momentum"], "updated_at": m["updated_at"],
+            } for m in STORE.values()]
+        meta = META
     rank = {"full": 0, "partial": 1, "none": 2}
     items.sort(key=lambda x: (rank.get(x["coverage"], 3), -abs((x["dominance"] or 50) - 50)))
-    return jsonify({"matches": items, "meta": META, "interval": POLL_INTERVAL})
+    return jsonify({"matches": items, "meta": meta, "interval": POLL_INTERVAL})
 
 
 @app.route("/api/match/<int:fid>")
 def api_match(fid):
+    r = db.latest_one(fid)
+    if r is not None:
+        return jsonify(_detail_from_dbrow(r))
     with _lock:
         m = STORE.get(fid)
     if not m:

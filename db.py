@@ -123,6 +123,47 @@ def row_from(entry, home_stats, away_stats, changed, odds=None):
     return tuple(r.get(c) for c in ALL_COLS)
 
 
+def _query(sql, params=None):
+    conn = None
+    try:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.fetchall()
+    except Exception as e:  # noqa: BLE001
+        STATUS["last_error"] = f"query: {e}"
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def latest_live(minutes=12):
+    """Latest snapshot per fixture seen in the last `minutes` (i.e. currently live).
+    Returns a list of column->value dicts, or None if the DB is unavailable."""
+    if not (DATABASE_URL and psycopg2):
+        return None
+    sql = (f"SELECT DISTINCT ON (fixture_id) {', '.join(ALL_COLS)} "
+           f"FROM snapshots WHERE scan_ts > now() - interval '{int(minutes)} minutes' "
+           f"ORDER BY fixture_id, scan_ts DESC")
+    rows = _query(sql)
+    if rows is None:
+        return None
+    return [dict(zip(ALL_COLS, r)) for r in rows]
+
+
+def latest_one(fixture_id):
+    """Most recent snapshot for one fixture, as a column->value dict (or None)."""
+    if not (DATABASE_URL and psycopg2):
+        return None
+    sql = (f"SELECT {', '.join(ALL_COLS)} FROM snapshots "
+           f"WHERE fixture_id = %s ORDER BY scan_ts DESC LIMIT 1")
+    rows = _query(sql, (fixture_id,))
+    if not rows:
+        return None
+    return dict(zip(ALL_COLS, rows[0]))
+
+
 def insert_rows(rows):
     """Bulk-insert snapshot rows. Best-effort; errors recorded, never raised."""
     if not rows or not (DATABASE_URL and psycopg2):
