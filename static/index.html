@@ -22,6 +22,8 @@
   .meta{font-size:12px;color:var(--dim);margin-left:auto;text-align:right;line-height:1.35}
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--home);
     margin-right:5px;animation:pulse 1.6s infinite}
+  .logout{margin-left:14px;font-size:12px;color:var(--dim);white-space:nowrap}
+  .logout:hover{color:var(--txt)}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
   /* list */
@@ -111,6 +113,7 @@
 <header>
   <h1>Live Momentum</h1>
   <div class="meta" id="meta"><span class="dot"></span>connecting…</div>
+  <a href="/logout" class="logout">Log out</a>
 </header>
 <div class="wrap" id="app"><div class="spin"></div></div>
 

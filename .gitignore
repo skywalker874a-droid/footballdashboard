@@ -11,3 +11,6 @@ momentum_log.txt
 
 # never commit secrets
 .env
+
+# local auth store (dev only)
+auth_users.db

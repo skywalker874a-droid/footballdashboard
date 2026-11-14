@@ -18,16 +18,23 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, send_from_directory
-
+import html as _html
 import socket
 
+from flask import Flask, jsonify, redirect, request, send_from_directory, session
+
+import auth
 import core
 import db
 import notify
 import sofa_api
 
-VERSION = "v9-alert-stats"  # bump each deploy so /api/debug confirms what's live
+VERSION = "v10-accounts"  # bump each deploy so /api/debug confirms what's live
+
+# Account system (admin via env; viewing the dashboard requires a login)
+SECRET_KEY = os.environ.get("SECRET_KEY", "dev-insecure-secret-change-me")
+ADMIN_USER = os.environ.get("ADMIN_USER")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
 # Telegram alert thresholds (env-overridable)
 ALERT_MIN_MINUTE = int(os.environ.get("ALERT_MIN_MINUTE", "15"))   # ignore before this minute
@@ -42,6 +49,8 @@ KEY = os.environ.get("APISPORTS_KEY")
 MAX_NONE_CHECKS = int(os.environ.get("MAX_NONE_CHECKS", "2"))
 
 app = Flask(__name__, static_folder="static")
+app.secret_key = SECRET_KEY
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
 _lock = threading.Lock()
 STORE = {}          # fid -> match dict (latest only; only full/partial matches)
@@ -254,13 +263,143 @@ def poller_loop():
         time.sleep(RETRY_INTERVAL if failed else POLL_INTERVAL)
 
 
-# ---------- API ----------
+# ---------- auth ----------
 @app.before_request
 def _ensure_poller_running():
     # Guarantees the poller runs in the gunicorn worker that serves requests,
     # regardless of fork/preload timing. Idempotent and cheap.
     if not _poller_alive():
         start_poller()
+
+
+@app.before_request
+def _auth_gate():
+    """Login required to view the dashboard and its data endpoints. Admin pages
+    require the admin session. /login and /logout are public."""
+    p = request.path
+    if p in ("/login", "/logout"):
+        return
+    if p.startswith("/admin"):
+        if not session.get("is_admin"):
+            return redirect("/login")
+        return
+    if not session.get("user"):
+        if p.startswith("/api/"):
+            return jsonify({"error": "authentication required"}), 401
+        return redirect("/login")
+
+
+def _page(title, body):
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title><style>
+  body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(900px 500px at 50% -10%,#12203a,#0b1120 55%,#090d17);
+    color:#eef2fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}}
+  .box{{width:100%;max-width:380px;background:#141c2e;border:1px solid #283454;border-radius:16px;
+    padding:26px;box-shadow:0 10px 40px rgba(0,0,0,.5)}}
+  .wide{{max-width:640px}}
+  h1{{font-size:20px;margin:0 0 4px}} .sub{{color:#8893b1;font-size:13px;margin:0 0 18px}}
+  label{{display:block;font-size:12px;color:#8893b1;margin:12px 0 5px}}
+  input{{width:100%;padding:11px 12px;border-radius:9px;border:1px solid #283454;background:#0c1322;
+    color:#eef2fb;font-size:14px;box-sizing:border-box}}
+  input:focus{{outline:none;border-color:#2dd4bf}}
+  button{{margin-top:18px;width:100%;padding:11px;border:0;border-radius:9px;cursor:pointer;
+    background:linear-gradient(90deg,#0f9e8e,#2dd4bf);color:#042a26;font-weight:800;font-size:14px}}
+  .err{{background:rgba(251,113,133,.14);color:#fda4af;border:1px solid #4a2230;border-radius:8px;
+    padding:9px 11px;font-size:13px;margin-bottom:6px}}
+  table{{width:100%;border-collapse:collapse;margin-top:6px}}
+  td,th{{text-align:left;padding:9px 6px;border-bottom:1px solid #222e4a;font-size:13px}}
+  th{{color:#8893b1;font-size:11px;text-transform:uppercase;letter-spacing:.4px}}
+  .row2{{display:flex;gap:8px}} .row2 input{{flex:1}}
+  .row2 button{{margin-top:0;width:auto;padding:11px 16px}}
+  .del{{background:#2a1620;color:#fda4af;border:1px solid #4a2230;border-radius:7px;padding:5px 10px;
+    cursor:pointer;font-size:12px;font-weight:700}}
+  .top{{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}}
+  a.logout{{color:#8893b1;font-size:13px;text-decoration:none}}
+</style></head><body><div class="box {('wide' if title=='Admin' else '')}">{body}</div></body></html>"""
+
+
+def _login_html(error=""):
+    err = f'<div class="err">{_html.escape(error)}</div>' if error else ""
+    return _page("Sign in", f"""
+      <h1>Live Momentum</h1><p class="sub">Sign in to view the dashboard</p>
+      {err}
+      <form method="post" action="/login">
+        <label>Username</label><input name="username" autofocus autocomplete="username">
+        <label>Password</label><input name="password" type="password" autocomplete="current-password">
+        <button type="submit">Sign in</button>
+      </form>""")
+
+
+def _admin_html(msg=""):
+    users = auth.list_users()
+    rows = "".join(
+        f"<tr><td>{_html.escape(u['username'])}</td>"
+        f"<td style='color:#8893b1'>{_html.escape((u['created'] or '')[:19])}</td>"
+        f"<td style='text-align:right'><form method='post' action='/admin/delete' "
+        f"onsubmit=\"return confirm('Delete {_html.escape(u['username'])}?')\" style='margin:0'>"
+        f"<input type='hidden' name='username' value='{_html.escape(u['username'])}'>"
+        f"<button class='del'>Delete</button></form></td></tr>"
+        for u in users) or "<tr><td colspan='3' style='color:#8893b1'>No accounts yet.</td></tr>"
+    note = f'<div class="err" style="background:rgba(45,212,191,.12);color:#5eead4;border-color:#1d4a44">{_html.escape(msg)}</div>' if msg else ""
+    return _page("Admin", f"""
+      <div class="top"><h1>Accounts</h1><a class="logout" href="/logout">Log out</a></div>
+      <p class="sub">Create and remove accounts that can view the dashboard.</p>
+      {note}
+      <form method="post" action="/admin/create" class="row2">
+        <input name="username" placeholder="username" autocomplete="off">
+        <input name="password" placeholder="password" autocomplete="off">
+        <button type="submit">Create</button>
+      </form>
+      <table><tr><th>Username</th><th>Created</th><th></th></tr>{rows}</table>""")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        u = (request.form.get("username") or "").strip()
+        pw = request.form.get("password") or ""
+        if ADMIN_USER and u == ADMIN_USER and pw == ADMIN_PASSWORD:
+            session["user"] = u
+            session["is_admin"] = True
+            return redirect("/admin")
+        if auth.verify(u, pw):
+            session["user"] = u
+            session["is_admin"] = False
+            return redirect("/")
+        return _login_html("Invalid username or password."), 401
+    if session.get("is_admin"):
+        return redirect("/admin")
+    if session.get("user"):
+        return redirect("/")
+    return _login_html()
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.route("/admin")
+def admin_panel():
+    return _admin_html()
+
+
+@app.route("/admin/create", methods=["POST"])
+def admin_create():
+    ok, err = auth.create_user(request.form.get("username"), request.form.get("password"))
+    return _admin_html("Account created." if ok else (err or "Could not create account."))
+
+
+@app.route("/admin/delete", methods=["POST"])
+def admin_delete():
+    auth.delete_user((request.form.get("username") or "").strip())
+    return _admin_html("Account deleted.")
+
+
+# ---------- API ----------
 
 
 def _fnum(v):
