@@ -277,7 +277,8 @@ def _auth_gate():
     """Login required to view the dashboard and its data endpoints. Admin pages
     require the admin session. /login and /logout are public."""
     p = request.path
-    if p in ("/login", "/logout"):
+    # public: login flow + health check (Render pings /api/meta; it exposes only counts)
+    if p in ("/login", "/logout", "/healthz", "/api/meta"):
         return
     if p.startswith("/admin"):
         if not session.get("is_admin"):
@@ -353,6 +354,11 @@ def _admin_html(msg=""):
         <button type="submit">Create</button>
       </form>
       <table><tr><th>Username</th><th>Created</th><th></th></tr>{rows}</table>""")
+
+
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
 
 
 @app.route("/login", methods=["GET", "POST"])
